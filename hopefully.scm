@@ -115,6 +115,9 @@
    ;;(define-inline (%stmref-transaction cell) (stmref-transaction cell))
    ))
 
+ ;; I forgot about "make-locative" when I wrote this.  Should probably
+ ;; be rewritten.
+
  (: make-tslot-ref ((struct stmtnx) * fixnum --> (struct stmref)))
  (define (make-tslot-ref transaction source slot) ;; oddly named internal unsafe
    ;; (ensure fixnum? slot)
@@ -208,7 +211,7 @@
  (: @ ((struct stmref) --> *))
  (define @ (getter-with-setter cell-ref alter!))
 
- (: transaction-commit! ((struct stmtnx) -> (or false (struct stmtnx))))
+ (: transaction-commit! ((struct stmtnx) -> (or false (struct stmtnx) pair)))
  (define (transaction-commit! transaction)
    #;(if (txnclosed? (%stmtnx-id transaction))
        (error "transaction already closed"))
@@ -218,14 +221,37 @@
      (let loop ((refs (stmtnx-refs transaction))
 		(dirty '()))
        (if (null? refs)
-	   (begin
-	     (for-each
-	      (lambda (x)
-		(let ((source (%stmref-source x)) (slot (%stmref-slot x)))
-		  (update! source slot (+ (%stmref-tag x) 2) (%stmref-val x))))
-	      dirty)
+	   (let ((trigger-handler (current-trigger-handler))
+		 ;; `found` needs a type declaration since we compile
+		 ;; with -O3, which includes -specialize
+		 (found (the (or boolean pair) #f)))
+	     (if
+	      (or (not trigger-handler)
+		  (handle-exceptions
+		   ex (begin	;; Conflict. Undo dirty tagging.
+			(for-each
+			 (lambda (x) (##sys#setislot (%stmref-source x) (%stmref-slot x) (%stmref-tag x)))
+			 dirty)
+			(transaction-close! transaction) ;; or should this be done elsewhere?
+			(raise ex)
+			#f)
+		   (set! found ((trigger-handler-sync trigger-handler)
+				(map (lambda (thunk) (thunk))
+				     (fold (let ((merge (trigger-handler-merge trigger-handler)))
+					     (lambda (x i)
+					       (merge lock-tag (%stmref-source x) (%stmref-slot x) i)))
+					   ((trigger-handler-new trigger-handler))
+					   dirty))))
+		   #t))
+	      (for-each
+	       (lambda (x)
+		 (let ((source (%stmref-source x)) (slot (%stmref-slot x)))
+		   (update! source slot (+ (%stmref-tag x) 2) (%stmref-val x))))
+	       dirty))
 	     (transaction-close! transaction)
-	     transaction)
+	     (if found
+		 (cons (trigger-handler-done trigger-handler) found)
+		 transaction))
 	   (let ((x (car refs)))
 	     (let ((source (%stmref-source x)) (slot (%stmref-slot x)))
 	       (let ((tag (##sys#slot source slot)))
@@ -289,21 +315,28 @@
 
  (: with-current-transaction ((procedure () . *) -> . *))
  (define (with-current-transaction thunk)
-   (apply
-    values
     (if (current-transaction)
 	(thunk)
 	(let ((tnx (new-transaction #t)))
-	  (parameterize
-	   ((%current-transaction tnx))
-	   (let loop ()
-	     (receive
-	      results (thunk)
-	      (if (transaction-commit! tnx)
-		  results
-		  (begin
-		    (transaction-reopen! tnx)
-		    (loop))))))))))
+	  (let ((x (parameterize
+		    ((%current-transaction tnx))
+		    (let loop ()
+		      (receive
+		       results (thunk)
+		       #;(if (transaction-commit! tnx)
+		       results
+		       (begin
+		       (transaction-reopen! tnx)
+		       (loop)))
+		       (let ((post-triggers (transaction-commit! tnx)))
+			 (if post-triggers
+			     (cons results post-triggers)
+			     (begin
+			       (transaction-reopen! tnx)
+			       (loop)))))))))
+	    ;; Call post triggers if any.
+	    (if (pair? (cdr x))	((cadr x) (cddr x)))
+	    (apply values (car x))))))
 
  (: current-slot-ref (* fixnum --> *))
  (define (current-slot-ref source slot) ;; oddly named internal unsafe
@@ -398,10 +431,11 @@
 (module
  hopefully-current
  (with-current-transaction
-  (syntax: define-ac-record))
+  (syntax: define-ac-record random))
  (reexport (only hopefully-intern with-current-transaction))
  (reexport (only hopefully-intern-atomics current-transaction))
  (import scheme chicken hopefully-intern)
+ (import (only extras random))
 
  ;;  Shamelessly stolen from chicken-syntax
 

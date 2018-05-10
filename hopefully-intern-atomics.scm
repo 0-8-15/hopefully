@@ -71,6 +71,12 @@
      ((eq? (%stmtnx-owner ct) (current-thread))))
     ct))
 
+ ;; Triggers are experimental.
+
+ (define-record trigger-handler new merge sync done)
+ 
+ (define current-trigger-handler (make-parameter #f))
+
  ;; #### Work around Chicken hash tables not supporting arbitrary
  ;; objects as keys.
  (cond-expand

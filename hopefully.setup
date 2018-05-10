@@ -1,10 +1,12 @@
 ;; -*-Scheme-*-
 
-(compile -s -O3 -d2 -J -emit-type-file "hopefully-intern-atomics.types" "hopefully-intern-atomics.scm")
-(compile -c -O3 "hopefully-intern-atomics.scm" -unit hopefully-intern-atomics)
+(define opt-flags '(-O3 -lfa2 -d2 -no-trace -no-lambda-info))
+
+(compile -s ,@opt-flags -J -emit-type-file "hopefully-intern-atomics.types" "hopefully-intern-atomics.scm")
+(compile -c ,@opt-flags "hopefully-intern-atomics.scm" -unit hopefully-intern-atomics)
 (compile -s -O2 -d0 "hopefully-intern-atomics.import.scm")
-(compile -s -O3 -d2 -J -I "." -emit-type-file "hopefully.types" "hopefully.scm")
-(compile -c -O3 "hopefully.scm" -unit hopefully)
+(compile -s ,@opt-flags -J -I "." -emit-type-file "hopefully.types" "hopefully.scm")
+(compile -c ,@opt-flags "hopefully.scm" -unit hopefully)
 (compile -s -O2 -d0 "hopefully-intern.import.scm")
 (compile -s -O2 -d0 "hopefully-good.import.scm")
 (compile -s -O2 -d0 "hopefully-current.import.scm")
@@ -17,4 +19,4 @@
    "hopefully.so" "hopefully.import.so"
    "hopefully-intern.import.so"
    "hopefully-good.import.so" "hopefully-current.import.so")
- '((version "0.2.3.1")))
+ '((version "0.2.3.2")))

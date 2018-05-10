@@ -1,0 +1,8 @@
+*.scm~
+*.scm#*
+.#*.scm
+
+*.types
+*.import.scm
+*.o
+*.so
