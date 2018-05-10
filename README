@@ -1,0 +1,206 @@
+[[tags: egg]]
+== hopefully
+
+Simple composable transactional memory.
+
+The API is similar to Clojure and STMX.  However (currently) limited, focused on a low level, procedural interface.
+
+[[toc:]]
+=== Overview
+
+This egg provides two modules: {{hopefully}} and
+{{hopefully-current}}.
+
+Module {{hopefully}} contains bindings recommended to use.  These
+transactions are roughly as fast as normal locking.  (Depending more
+on compiler optimizations and usage szenarios.)
+
+Module {{hopefully-current}} adds support for the concept of an
+implicit current transaction, which is nice but and order of magnitude
+more expensive at runtime.
+
+=== Issues
+
+{{define-a-record}} and {{define-ac-record}} both define a
+{{TYPE-FIELD}} accessor, though with incompatible semantics.  While
+the AC-variant is changes meaning depending on whether or not there is
+a {{current-transaction}} on the thread.  The A-variant always returns
+the external value.  The former is OK, since the whole purpose is to
+be downward compatible to {{define-record}}-based code not aware of
+transactions.  But once most of a code base is converted to use
+references, once only wants to replace {{define-ac-record}} with
+{{define-a-record}}.  At that time those field readers should not
+suddenly change meaning anymore.   The old "global" accessors should
+become inaccessible.  The "alway-return-global-value"
+accessors need to be renamed (and the renamed value defined by {{define-ac-record}} as
+well to aid the transition).  Just how rename it?  Append "{{@}}"?
+
+=== Modules
+
+==== hopefully
+
+<syntax>define-a-record</syntax>
+
+Like define-record, defines procedures according to the following
+pattern.
+
+<procedure>(make-TYPE FIELDS ...) -> AREC</procedure>
+
+<procedure>(TYPE-FIELD-ref AREC TNX) => REF</procedure>
+
+Return a reference for use with CELL-REF (alias "@") and ALTER!.
+
+Note: Try to use this accessor just once per object+field.  Multiple
+calls (within a lightweight transaction) will produce independent
+references.  (If these become inconsistent, the commit will fail
+nevertheless.)  Only those references used to {{(set! (@ REF) val)}}
+will return the in-transaction value.
+
+<procedure>(TYPE-FIELD AREC)</procedure>
+
+Return the FIELD value visible without transactions in effect.
+
+<procedure>(TYPE-tag AREC)</procedure>
+
+Purely for debugging.  Mayb e removed. Return the internal version tag
+of the slot.
+
+<procedure>(cell-ref REF)</procedure>
+
+Retrieve the in-transaction value from the {{REF}}erence (and add it
+to the transactions dependencies).
+
+<procedure>(@ REF)</procedure>
+
+Alias to cell-ref.  With generalized setter.
+
+<procedure>(alter! REF val)</procedure>
+
+Alter a {{REF}}erence (produced by the {{type}}-{{field}}-ref
+accessors to hold the new value {{val}}.  This also adds the cell to
+the dependencies of the transaction associated with the {{REF}}.
+
+<procedure>(call-with-transaction PROC)</procedure>
+<procedure>(call-with-transaction/values PROC)</procedure>
+
+Call PROC with one argument, a fresh (lightweight) transaction.
+PROC may be called multiple times in case of a conflict.
+(See hopefully-current for the difference to heavy transactions).
+
+Returns whatever PROC returns.  Use {{call-with-transaction}} for
+multiple value returns {{call-with-transaction/values}} returns all
+values.
+
+Note: One {{should not}} pass the transaction argument around among
+threads or capture it.  Most (if not all) resulting conditions should
+be handled.  But it is no good idea.
+
+==== hopefully-current
+
+This module introduces the concept of a default
+{{current-transaction}} and heavy transactions.
+
+When a reference is added to a heavy transaction, the transactions
+dependencies are searched and if a reference to the same object+slot
+is found, it is returned.
+
+<syntax>define-ac-record</syntax>
+
+Like {{define-a-record}}.
+
+{{define-ac-record}} is provided for maximum compatibility with
+{{define-record}}.  Just changing the record definition should make
+code aware of the current transaction.
+
+<procedure>(make-TYPE FIELDS..) -> ACREC</procedure>
+
+Accessors:
+
+<procedure>(TYPE-FIELD-ref ACREC TNX) => REF</procedure>
+
+Return a reference to the in-transaction value of {{field}} in
+{{ACREC}} for use with CELL-REF (alias "@") and ALTER!.  See sibling
+definition in {{hopefully}}.
+
+<procedure>(TYPE-FIELD ACREC)</procedure>
+
+Return the value of {{field}} in ACREC.  Returns the in-transaction
+value with respect to the {{current-transaction}} or the outside value
+if there is no {{current-transaction}} in the {{current-thread}}.
+
+Note: this is roughly an order of magnitude slower than the
+corresponding accessor from {{define-a-record}}
+
+<procedure>(TYPE-FIELD-set! ACREC val) -> undefined</procedure>
+
+Set the value of {{field}} to {{val}}.  Changes the in-transaction
+value respect to the {{current-transaction}} or the outside value if
+there is no {{current-transaction}} in the {{current-thread}}.
+
+Note: this is roughly an order of magnitude slower than the
+corresponding accessor from {{define-a-record}}
+
+<procedure>(with-current-transaction THUNK)</procedure>
+
+Establish a new {{current-transaction}} and call {{THUNK}}.
+After thunk completed, commit the current transaction.
+If that failes, THUNK is called again.
+
+Returns whatever THUNK returns.
+
+=== Examples
+
+<enscript highlight="scheme">
+(define-a-record gbox v)
+(define b1 (make-gbox 0))
+(define b2 (make-gbox 1))
+
+(call-with-transaction
+ (lambda (tnx)
+   (let ((x (gbox-v-ref b1 tnx))
+         (i (gbox-v-ref b2 tnx)))
+     (let ((ni (@ i)))
+       (alter! x (+ (@ x) ni))
+       (alter! i (add1 ni))))))
+</enscript>
+
+See also tests/run.scm.
+
+=== Compile time options
+
+-D with-disable-interrupts: disable-interrupts
+
+-D no-dirty-tagging : save some internal consitency checks, requires -D with-disable-interrupts
+
+-D debug: add additional consitency checks
+
+-D warn-duplicate-ref: Issue runtime warnings about multiple
+ references taken (except when used with {{current-transaction}}).
+ Intented as debug tool only to aid transition to lightweight
+ transactions.  (Expensive at runtime.  Do not use for production
+ code.)
+
+=== About this egg
+
+==== Source
+
+Latest version: [[http://askemos.org/chicken-eggs/hopefully/hopefully.tar.gz|hopefully from askemos.org]]
+
+==== Authors
+
+Jörg F. Wittenberger
+
+==== Version History
+
+0.2.3: 2015-12-28 -- Modified tests/run.scm as it did work on some, but not all platforms.
+
+0.2.2: 2015-12-21 -- Bugfix: use of ##sys#setislot with non-immediate objects.  Some more tweaks.
+
+0.2.1: 2015-12-19 -- Some tweaks.
+
+0.2: 2015-12-18 -- Replacing chicken hash tables with llrb trees made
+ac-records about 4x faster.
+
+0.1.1: 2015-12-18 -- Fix missing unquote.
+
+0.1: 2015-12-16 -- Initial Release
