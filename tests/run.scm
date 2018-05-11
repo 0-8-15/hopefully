@@ -189,6 +189,115 @@
   (assert (= (obox-v b1) 455))
   (assert (= (obox-v b2) 65)))
 
+
+
+(define-ac-record control-variable v key assertion deps)
+
+(define (regref! obj trigger)
+  (or (memq trigger (control-variable-deps obj))
+      (control-variable-deps-set! obj (cons trigger (control-variable-deps obj)))))
+
+(define a (make-control-variable 23 'a #f '()))
+(define b (make-control-variable 42 'b #f '()))
+
+(define print-change
+  (lambda (t)
+    (format (current-error-port) "Prepare from ~a ~a\n" (control-variable-v a) (control-variable-v b))
+    (format (current-error-port) "Prepare to   ~a ~a\n" (@ (control-variable-v-ref a t)) (@ (control-variable-v-ref b t)))
+    (lambda ()
+      (format (current-error-port) "Commit from ~a ~a\n" (control-variable-v a) (control-variable-v b))
+      (format (current-error-port) "Commit to   ~a ~a\n" (@ (control-variable-v-ref a t)) (@ (control-variable-v-ref b t)))
+      (list (lambda ()
+	      (format (current-error-port) "Consequence ~a ~a\n" (control-variable-v a) (control-variable-v b))
+	      #t)))))
+
+(regref! a print-change)
+(regref! b print-change)
+
+(define (debug-trace) #t)
+
+(define triggers
+  (make-trigger-handler
+   ;; Return initial value for fold operation.
+   (lambda () '() #;(list (lambda () (lambda () '()))) )
+   ;; folding function; returns list of procedures receiving a transaction to call.  Those should
+   ;; prepare for a commit.  This procedure as well as those thunks
+   ;; MUST NOT change additional STM values.  They may fail, aborting
+   ;; the commit.
+   (lambda (t s n i)
+     (if (and (control-variable? s) (= n 2))
+	 (begin
+	   (if (debug-trace)
+	       (format (current-error-port) "T ~a K ~a: ~a\n" t (control-variable-key s) (control-variable-deps s)))
+	   (lset-union eq? i (control-variable-deps s)))
+	 i))
+   ;; Sync function receives a list of thunks which MUST NOT fail to
+   ;; complete the commit.  Still within the commit protocol: MUST NOT
+   ;; change STM values.
+   (lambda (l)
+     (fold (lambda (thunk init)
+	     (let ((next (thunk)))
+	       (if (debug-trace)
+		   (format (current-error-port) "Phase I trigger ~a returns ~a\n" thunk next))
+	       (lset-union eq? init (if (or (pair? next) (null? next)) next (list next)))))
+	   (list (lambda () "The elephant in Cairo for the sake of `lset-union`."))
+	   l))
+   ;; Post commit trigger.  Signal change.  MAY trigger additional
+   ;; transactions.
+   (lambda (l)
+     (if (debug-trace)
+	 (format (current-error-port) "Post transaction triggers: ~a\n" l))
+     (for-each (lambda (thunk) (thunk)) l)
+     ;; (trail-complete! *default-trail*)
+     )))
+
+(parameterize
+ ((current-trigger-handler triggers))
+ (with-current-transaction
+  (lambda ()
+    (control-variable-v-set! a 11)
+    (control-variable-v-set! b 12))))
+
+(parameterize
+ ((current-trigger-handler triggers))
+ (with-current-transaction
+  (lambda ()
+    (control-variable-v-set! a 3)
+    (control-variable-v-set! b 5))))
+
+(assert (= (control-variable-v a) 3))
+(assert (= (control-variable-v b) 5))
+
+(format (current-error-port) "Testing without current transaction\n")
+
+(parameterize
+ ((current-trigger-handler triggers))
+ (call-with-transaction
+  (lambda (t)
+    (let ((ar (control-variable-v-ref a t))
+	  (br (control-variable-v-ref b t)))
+      (alter! ar 11)
+      (alter! br 12))
+    (format (current-error-port) "Change to 11 and 12\n"))
+  #t))
+
+(parameterize
+ ((current-trigger-handler triggers))
+ (call-with-transaction
+  (lambda (t)
+    (let ((ar (control-variable-v-ref a t))
+	  (br (control-variable-v-ref b t)))
+      (alter! ar 3)
+      (alter! br 5)))
+  ;; Note: not using a "heavy" transaction here deprives triggers from
+  ;; seeing in-transaction values!
+  #f))
+
+(assert (= (control-variable-v a) 3))
+(assert (= (control-variable-v b) 5))
+
+
+
 (define-record foo bar)
 (define baz (make-foo 0))
 (define bazi (make-foo 1))
@@ -251,6 +360,22 @@
 	 (obox-v-set! b1 (+ (obox-v b1) i))
 	 (obox-v-set! b2 (add1 i)))))))
 
+(define (time-optimitic-better n)
+  (define t0 (current-milliseconds))
+  (do ((i 0 (add1 i)))
+      ((= i n)
+       (let ((t (- (current-milliseconds) t0)))
+	 (format (current-output-port) "Optimistic/heavy ~a op in ~a ms (~a op/ms)\n" n t (/ n t))))
+    (call-with-transaction
+     (lambda (t)
+       (let ((b1r (obox-v-ref b1 t))
+	     (b2r (obox-v-ref b2 t)))
+	 (let ((i (@ b2r)))
+	   (alter! b1r (+ (@ b1r) i))
+	   (alter! b2r (add1 i)))))
+     ;; Important: must use heady transaction.
+     #t)))
+
 (define (time-record-access n)
   (define t0 (current-milliseconds))
   (do ((i 0 (add1 i)))
@@ -280,19 +405,40 @@
       (obox-v-set! b1 (+ (obox-v b1) i))
       (obox-v-set! b2 (add1 i)))))
 
+(define (time-ac-record-access3 n t)
+  (define t0 (current-milliseconds))
+  (do ((i 0 (add1 i)))
+      ((= i n)
+       (let ((t (- (current-milliseconds) t0)))
+	 (format (current-output-port) "Heavy record access in trans ~a op in ~a ms (~a op/ms)\n" n t (/ n t))))
+    (let ((b1r (obox-v-ref b1 t))
+	  (b2r (obox-v-ref b2 t)))
+      (let ((i (@ b2r)))
+	(alter! b1r (+ (@ b1r) i))
+	(alter! b2r (add1 i))))))
+
 (define (run0.3 n)
   (time-record-access n) (gc #t)
   (time-ac-record-access n)  (gc #t)
   (with-current-transaction (lambda () (time-ac-record-access2 n)))  (gc #t)
+  (call-with-transaction (lambda (t) (time-ac-record-access3 n t)) #t)  (gc #t)
   )
+
+(define dummy (make-parameter #f))
 
 (define (run3 n)
   (define (call-helper x) (x 1))
+  (gc #t)
   (time-locking call-helper n)
   (gc #t)
   (time-optimitic n)
+  (format (current-output-port) "Locking with parameter usage\n")
+  (gc #t)
+  (time-locking (lambda (x) (parameterize ((dummy (current-transaction))) (x 1))) n)
   (gc #t)
   (time-optimitic-bad n)
+  (gc #t)
+  (time-optimitic-better n)
   (gc #t)
   )
 

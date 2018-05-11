@@ -236,7 +236,7 @@
 			(raise ex)
 			#f)
 		   (set! found ((trigger-handler-sync trigger-handler)
-				(map (lambda (thunk) (thunk))
+				(map (lambda (proc) (proc transaction))
 				     (fold (let ((merge (trigger-handler-merge trigger-handler)))
 					     (lambda (x i)
 					       (merge lock-tag (%stmref-source x) (%stmref-slot x) i)))
@@ -291,27 +291,37 @@
 			   (transaction-close! transaction) ;; or should this be done elsewhere?
 			   #f)))))))))))))
 
+ (define-inline (call-post-triggers! commited)
+   ;; Call post triggers if any.
+   (if (pair? commited) ((car commited) (cdr commited))))
+
  (: call-with-current-transaction/values ((procedure () . *) &rest boolean -> . *))
  (define (call-with-transaction/values proc . heavy?)
    (let ((tnx (new-transaction (and (pair? heavy?) (car heavy?)))))
      (let loop ()
        (receive
 	results (proc tnx)
-	(if (transaction-commit! tnx)
-	    (apply values results)
-	    (begin
-	      (transaction-reopen! tnx)
-	      (loop)))))))
+	(let ((commited (transaction-commit! tnx)))
+	  (if commited
+	      (begin
+		(call-post-triggers! commited)
+		(apply values results))
+	      (begin
+		(transaction-reopen! tnx)
+		(loop))))))))
 
  (: call-with-current-transaction ((procedure () . *) &rest boolean -> *))
  (define (call-with-transaction proc . heavy?)
    (let ((tnx (new-transaction (and (pair? heavy?) (car heavy?)))))
      (let loop ((x (proc tnx)))
-       (if (transaction-commit! tnx)
-	   x
-	   (begin
-	     (transaction-reopen! tnx)
-	     (loop (proc tnx)))))))
+       (let ((commited (transaction-commit! tnx)))
+	 (if commited
+	     (begin
+	       (call-post-triggers! commited)
+	       x)
+	     (begin
+	       (transaction-reopen! tnx)
+	       (loop (proc tnx))))))))
 
  (: with-current-transaction ((procedure () . *) -> . *))
  (define (with-current-transaction thunk)
@@ -334,8 +344,7 @@
 			     (begin
 			       (transaction-reopen! tnx)
 			       (loop)))))))))
-	    ;; Call post triggers if any.
-	    (if (pair? (cdr x))	((cadr x) (cddr x)))
+	    (call-post-triggers! (cdr x))
 	    (apply values (car x))))))
 
  (: current-slot-ref (* fixnum --> *))

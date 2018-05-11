@@ -6,3 +6,5 @@
 *.import.scm
 *.o
 *.so
+
+tests/run
