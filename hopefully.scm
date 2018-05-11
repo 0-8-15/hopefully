@@ -376,8 +376,9 @@
 (module
  hopefully-good
  (cell-ref @ alter! call-with-transaction call-with-transaction/values
-  (syntax: define-a-record))
+  (syntax: define-a-record random))
  (import scheme chicken hopefully-intern srfi-1)
+ (import (only extras random))
  (define-syntax define-a-record
    (##sys#er-transformer
     (lambda (x r c)
@@ -393,6 +394,8 @@
 	     (%make-cell (r 'make-tslot-ref))
 	     (%cell-ref (r 'cell-ref))
 	     (%random (r 'random))
+	     (%pair? (r 'pair?))
+	     (%car (r 'car))
 	     (slotnames slots))
 	`(##core#begin
 	  (,%define ,name (##sys#make-structure 'atomic-record ',name))
@@ -430,8 +433,8 @@
 			(##core#lambda 
 			 (x . transaction)
 			 (##core#check (##sys#check-structure x (##core#quote ,name)))
-			 (if transaction
-			     (,%cell-ref (,%make-cell (##sys#slot transaction 0) x ,i))
+			 (if (,%pair? transaction)
+			     (,%cell-ref (,%make-cell (,%car transaction) x ,i))
 			     (##sys#block-ref x ,(add1 i))) ) ) )
 		     (mapslots (##sys#slot slots 1) (fx+ i 2)) ) ) ) ) ) ) ) ) )
 

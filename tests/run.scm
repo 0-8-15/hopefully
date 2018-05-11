@@ -23,6 +23,23 @@
   (Xinternal:transaction-commit! tnx)
   )
 
+(define-a-record abox v)
+(define ab1 (make-abox 7))
+
+(call-with-transaction
+ (lambda (tnx)
+   (let ((x (abox-v-ref ab1 tnx)))
+     (assert (= (cell-ref x) 7))
+     (alter! x 13)
+     )))
+
+(call-with-transaction
+ (lambda (tnx)
+   (let ((x (abox-v-ref ab1 tnx)))
+     (assert (= (@ x) 13))
+     (alter! x 7)
+     )))
+
 (import hopefully-current)
 (define-ac-record obox v)
 
@@ -191,25 +208,37 @@
 
 
 
-(define-ac-record control-variable v key assertion deps)
+(define-a-record control-variable v key assertion deps)
 
 (define (regref! obj trigger)
-  (or (memq trigger (control-variable-deps obj))
-      (control-variable-deps-set! obj (cons trigger (control-variable-deps obj)))))
+  (call-with-transaction
+   (lambda (transaction)
+     (let* ((deps (control-variable-deps-ref obj transaction))
+	    (old (@ deps)))
+       (or (memq trigger old)
+	   (alter! deps (cons trigger old)))))))
 
 (define a (make-control-variable 23 'a #f '()))
 (define b (make-control-variable 42 'b #f '()))
 
 (define print-change
   (lambda (t)
+    ;; Prepare phase. May fail or block but not incure any effects.
+    ;; Fails to find the correct value if the transaction is not a "heavy one".
     (format (current-error-port) "Prepare from ~a ~a\n" (control-variable-v a) (control-variable-v b))
     (format (current-error-port) "Prepare to   ~a ~a\n" (@ (control-variable-v-ref a t)) (@ (control-variable-v-ref b t)))
     (lambda ()
+      ;; Commit/sync phase. MUST NOT fail or modify STM, but may block
+      ;; commiting elsewhere.
+      ;; Fails to find the correct value if the transaction is not a "heavy one".
       (format (current-error-port) "Commit from ~a ~a\n" (control-variable-v a) (control-variable-v b))
       (format (current-error-port) "Commit to   ~a ~a\n" (@ (control-variable-v-ref a t)) (@ (control-variable-v-ref b t)))
-      (list (lambda ()
-	      (format (current-error-port) "Consequence ~a ~a\n" (control-variable-v a) (control-variable-v b))
-	      #t)))))
+      (lambda ()
+	;; Schedule post transaction consequences.  (Should not block,
+	;; should rather signal existing threads thank forking fresh
+	;; threads (in order to clean the current-triggers parameter).
+	(format (current-error-port) "Consequence ~a ~a\n" (control-variable-v a) (control-variable-v b))
+	#t))))
 
 (regref! a print-change)
 (regref! b print-change)
@@ -220,9 +249,10 @@
   (make-trigger-handler
    ;; Return initial value for fold operation.
    (lambda () '() #;(list (lambda () (lambda () '()))) )
-   ;; folding function; returns list of procedures receiving a transaction to call.  Those should
-   ;; prepare for a commit.  This procedure as well as those thunks
-   ;; MUST NOT change additional STM values.  They may fail, aborting
+   ;; folding function; returns list of procedures receiving a
+   ;; transaction to call.  Those should prepare for a commit.  This
+   ;; procedure as well as those thunks MUST NOT change additional STM
+   ;; values let alone cause side effects.  They may fail, aborting
    ;; the commit.
    (lambda (t s n i)
      (if (and (control-variable? s) (= n 2))
@@ -233,7 +263,8 @@
 	 i))
    ;; Sync function receives a list of thunks which MUST NOT fail to
    ;; complete the commit.  Still within the commit protocol: MUST NOT
-   ;; change STM values.
+   ;; change STM values or contain nested transactions but may
+   ;; cause/sync other side effects.
    (lambda (l)
      (fold (lambda (thunk init)
 	     (let ((next (thunk)))
@@ -243,7 +274,10 @@
 	   (list (lambda () "The elephant in Cairo for the sake of `lset-union`."))
 	   l))
    ;; Post commit trigger.  Signal change.  MAY trigger additional
-   ;; transactions.
+   ;; transactions.  SHOULD not block.  Note: those procedures should be
+   ;; aware that they are called with the trigger setting in effect.
+   ;; Better send asynchronous operations to pre-created threads than
+   ;; forking threads from within.
    (lambda (l)
      (if (debug-trace)
 	 (format (current-error-port) "Post transaction triggers: ~a\n" l))
@@ -255,15 +289,15 @@
  ((current-trigger-handler triggers))
  (with-current-transaction
   (lambda ()
-    (control-variable-v-set! a 11)
-    (control-variable-v-set! b 12))))
+    (alter! (control-variable-v-ref a (current-transaction)) 11)
+    (alter! (control-variable-v-ref b (current-transaction)) 12))))
 
 (parameterize
  ((current-trigger-handler triggers))
  (with-current-transaction
   (lambda ()
-    (control-variable-v-set! a 3)
-    (control-variable-v-set! b 5))))
+    (alter! (control-variable-v-ref a (current-transaction)) 3)
+    (alter! (control-variable-v-ref b (current-transaction)) 5))))
 
 (assert (= (control-variable-v a) 3))
 (assert (= (control-variable-v b) 5))
