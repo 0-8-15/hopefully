@@ -1,0 +1,18 @@
+;; -*- mode: Scheme; -*-
+((synopsis "Simple software transactional memory.")
+ (category hell)
+ (license "BSD")
+ (author "Jörg F. Wittenberger")
+ (version "0.2.4")
+ (dependencies srfi-1 srfi-18 miscmacros)
+ (components
+  (extension
+   hopefully
+   (types-file)
+   #;(csc-options -J -O3 -lfa2 -d2 -no-trace -no-lambda-info)
+   (csc-options
+    "-D" "with-disable-interrupts"
+    ;; no-dirty-tagging is a bit dangerous
+    ;; "-D" "no-dirty-tagging"
+    "-J" "-O3" "-lfa2" "-d2" "-no-trace" "-no-lambda-info")
+   (modules hopefully hopefully-intern hopefully-good hopefully-current))))

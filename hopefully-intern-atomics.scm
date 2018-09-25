@@ -16,13 +16,19 @@
 ;; Helper procedures which are atomic wrt. srfi-18 threads and (if so
 ;; documented) signal handlers.
 
-(use srfi-18 llrb-tree)
-
 (module
  hopefully-intern-atomics
  *
- (import scheme chicken srfi-18 llrb-tree)
- (import (only data-structures identity))
+ (import scheme)
+ (cond-expand
+  (chicken-4
+   (import chicken (only data-structures identity))
+   (use srfi-18))
+  (else
+   (import (chicken type))
+   (import (chicken base))
+   (import (chicken fixnum))
+   (import srfi-18)))
  
  (define new-transaction-identifier
    (let ((n 1))

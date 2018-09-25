@@ -1,4 +1,4 @@
-*.scm~
+*~
 *.scm#*
 .#*.scm
 
@@ -6,5 +6,9 @@
 *.import.scm
 *.o
 *.so
+*.build.sh
+*.install.sh
+*.link
+salmonella.log
 
 tests/run

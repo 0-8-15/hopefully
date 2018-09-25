@@ -28,10 +28,12 @@
   (set! "conflicting features: (not with-disable-interrupts) vs. no-dirty-tagging"))
  (else))
 
+;; BEWARE: This code depends on srfi-1 being compiled with disable-interrupts
 ;; Helper procedures which are atomic wrt. srfi-18 threads and (if so
 ;; documented) signal handlers.
 
-(use srfi-1)
+(require-library srfi-1)
+
 ;; This use clause disturbs development
 ;;
 ;;(use hopefully-intern-atomics)
@@ -39,10 +41,22 @@
 (module
  hopefully-intern
  *
- (import scheme chicken srfi-18)
+ (import scheme)
  (import hopefully-intern-atomics)
- (import srfi-1)
- (import (only extras random format))
+ (cond-expand
+  (chicken-4
+   (import chicken)
+   (import (only extras random format))
+   (use srfi-1 srfi-18))
+  (else
+   (import (chicken type))
+   (import (chicken base))
+   (import (chicken condition))
+   (import (chicken fixnum))
+   (import srfi-1 srfi-18 (only miscmacros ensure))
+   (import srfi-28)
+   (import (chicken random))
+   (define (random x) (pseudo-random-integer x))))
 
  (define (dbg l v)
    (format (current-error-port) "HD ~a: ~a\n" l v) v)
@@ -377,8 +391,16 @@
  hopefully-good
  (cell-ref @ alter! call-with-transaction call-with-transaction/values
   (syntax: define-a-record random))
- (import scheme chicken hopefully-intern srfi-1)
- (import (only extras random))
+ (import scheme)
+ (cond-expand
+  (chicken-4
+   (import (only extras random))
+   (import chicken hopefully-intern)
+   (import-for-syntax srfi-1))
+  (else
+   (import hopefully-intern)
+   (import (chicken syntax))
+   (begin-for-syntax (import (chicken fixnum) srfi-1))))
  (define-syntax define-a-record
    (##sys#er-transformer
     (lambda (x r c)
@@ -444,10 +466,20 @@
  hopefully-current
  (with-current-transaction
   (syntax: define-ac-record random))
+ (import scheme)
+ (cond-expand
+  (chicken-4
+   (import (only extras random))
+   (import chicken hopefully-intern)
+   (use srfi-1)
+   (import-for-syntax srfi-1))
+  (else
+   (import hopefully-intern)
+   (import (chicken syntax))
+   (begin-for-syntax (import (chicken fixnum) srfi-1))
+   (import (chicken module))))
  (reexport (only hopefully-intern with-current-transaction))
  (reexport (only hopefully-intern-atomics current-transaction))
- (import scheme chicken hopefully-intern)
- (import (only extras random))
 
  ;;  Shamelessly stolen from chicken-syntax
 
@@ -521,5 +553,9 @@
 (module
  hopefully
  *
+ (import scheme)
+ (cond-expand
+  (chicken-4)
+  (else (import (chicken module))))
  (reexport hopefully-good)
  )

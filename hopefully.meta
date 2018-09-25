@@ -4,7 +4,7 @@
  (author "Jörg F. Wittenberger")
  (synopsis "Simple software transactional memory.")
  (doc-from-wiki)
- (needs llrb-tree)
+ (needs #;llrb-tree)
  (files "hopefully.meta" "hopefully.setup" "hopefully.scm" "hopefully-intern-atomics.scm")
  '((version "0.2.3.2"))
  '((version "0.2.3.1"))

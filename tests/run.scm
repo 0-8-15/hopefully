@@ -1,14 +1,28 @@
-(use extras #;hopefully-intern-atomics)
-
 (cond-expand
- (sometimes
-  (import hopefully))
- (else (use hopefully) (import hopefully-intern-atomics)))
+ (chicken-4 (use srfi-1))
+ (else))
+(module test ()
+ (import scheme)
+ (cond-expand
+  (chicken-4
+   (import chicken)
+   (use extras)
+   (use srfi-1 srfi-18)
+   (use hopefully) (import hopefully-intern-atomics))
+  (else
+   (import hopefully) (import hopefully-intern-atomics)
+   (import (only hopefully-intern random))
+   (import (chicken base)
+	   (chicken format)
+	   (chicken gc)
+	   miscmacros
+	   srfi-18
+	   srfi-1)
+   (import (prefix (chicken time) base:))
+   (define (current-milliseconds) (exact->inexact (base:current-milliseconds)))))
 
 (define (dbg l v)
   (format (current-error-port) "D ~a: ~a\n" l v) v)
-
-(import hopefully-intern-atomics hopefully)
 
 (define r (vector 2 2 2 'b 4 'a))
 (define r (##sys#make-structure 'soso 2 2 2 'b 4 'a))
@@ -416,8 +430,9 @@
       ((= i n)
        (let ((t (- (current-milliseconds) t0)))
 	 (format (current-output-port) "Simple record access ~a op in ~a ms (~a op/ms)\n" n t (/ n t))))
-    (foo-bar-set! baz (+ (foo-bar baz) (foo-bar bazi)))
-    (foo-bar-set! bazi (+ 1 (foo-bar bazi)))))
+    (let ((i (foo-bar bazi)))
+      (foo-bar-set! baz (+ (foo-bar baz) i))
+      (foo-bar-set! bazi (add1 i)))))
 
 (define (time-ac-record-access n)
   (define t0 (current-milliseconds))
@@ -490,3 +505,4 @@
 
 (dbg 'Done 'success)
 (exit 0)
+) ; end module test
