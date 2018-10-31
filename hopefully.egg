@@ -3,7 +3,7 @@
  (category hell)
  (license "BSD")
  (author "Jörg F. Wittenberger")
- (version "0.2.4")
+ (version "0.2.5")
  (dependencies srfi-1 srfi-18 miscmacros)
  (components
   (extension
@@ -15,4 +15,5 @@
     ;; no-dirty-tagging is a bit dangerous
     ;; "-D" "no-dirty-tagging"
     "-J" "-O3" "-lfa2" "-d2" "-no-trace" "-no-lambda-info")
-   (modules hopefully hopefully-intern hopefully-good hopefully-current))))
+   (modules hopefully hopefully-intern hopefully-intern-atomics
+	    hopefully-good hopefully-current))))
