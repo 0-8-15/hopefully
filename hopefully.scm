@@ -425,7 +425,7 @@
 	   ,(string->symbol (string-append "make-" prefix))
 	   (##core#lambda
 	    ,slotnames
-	    (##sys#make-structure (##core#quote ,name) (random 16777216) ,@(fold-right (lambda (s i) (cons 2 (cons s i))) '() slotnames))))
+	    (##sys#make-structure (##core#quote ,name) (,%random 16777216) ,@(fold-right (lambda (s i) (cons 2 (cons s i))) '() slotnames))))
 	  (,%define
 	   ,(string->symbol (string-append prefix "?"))
 	   (##core#lambda (x) (##sys#structure? x (##core#quote ,name))) )
@@ -506,7 +506,7 @@
 	 ,(string->symbol (string-append "make-" prefix))
 	 (##core#lambda
 	  ,slotnames
-	  (##sys#make-structure (##core#quote ,name) (random 16777216) ,@(fold-right (lambda (s i) (cons 2 (cons s i))) '() slotnames))))
+	  (##sys#make-structure (##core#quote ,name) (,%random 16777216) ,@(fold-right (lambda (s i) (cons 2 (cons s i))) '() slotnames))))
 	(,%define
 	 ,(string->symbol (string-append prefix "?"))
 	 (##core#lambda (x) (##sys#structure? x (##core#quote ,name))) )
