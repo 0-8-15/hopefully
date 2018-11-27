@@ -19,4 +19,4 @@
    "hopefully.so" "hopefully.import.so"
    "hopefully-intern.import.so"
    "hopefully-good.import.so" "hopefully-current.import.so")
- '((version "0.2.5")))
+ '((version "0.2.6")))

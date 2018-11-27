@@ -3,8 +3,9 @@
  (category hell)
  (license "BSD")
  (author "Jörg F. Wittenberger")
- (version "0.2.5")
+ (version "0.2.6")
  (dependencies srfi-1 srfi-18 miscmacros)
+ (test-dependencies test)
  (components
   (extension
    hopefully
