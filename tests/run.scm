@@ -1,13 +1,14 @@
 (cond-expand
  (chicken-4 (use srfi-1))
  (else))
-(module test ()
+(module hopefully-tests ()
  (import scheme)
  (cond-expand
   (chicken-4
    (import chicken)
    (use extras)
    (use srfi-1 srfi-18)
+   (use test)
    (use hopefully) (import hopefully-intern-atomics))
   (else
    (import hopefully) (import hopefully-intern-atomics)
@@ -18,6 +19,7 @@
 	   miscmacros
 	   srfi-18
 	   srfi-1)
+   (import test)
    (import (prefix (chicken time) base:))
    (define (current-milliseconds) (exact->inexact (base:current-milliseconds)))))
 
@@ -32,6 +34,10 @@
 (import (prefix hopefully-intern Xinternal:))
 (define s0 (Xinternal:make-tslot-ref tnx r 2))
 
+(test-begin "hopefully - software transactional memory")
+
+(test-group "testing `alter!' and `cell-ref'"
+
 (let ((v0 (cell-ref s0)))
   (alter! s0 (+ 21 v0))
   (Xinternal:transaction-commit! tnx)
@@ -40,25 +46,36 @@
 (define-a-record abox v)
 (define ab1 (make-abox 7))
 
-(call-with-transaction
- (lambda (tnx)
-   (let ((x (abox-v-ref ab1 tnx)))
-     (assert (= (cell-ref x) 7))
-     (alter! x 13)
-     )))
+(test
+ "set value once"
+ 13
+ (call-with-transaction
+  (lambda (tnx)
+    (let ((x (abox-v-ref ab1 tnx)))
+      (assert (= (cell-ref x) 7))
+      (alter! x 13)
+      (cell-ref x)))))
 
-(call-with-transaction
- (lambda (tnx)
-   (let ((x (abox-v-ref ab1 tnx)))
-     (assert (= (@ x) 13))
-     (alter! x 7)
-     )))
+(test "change visible" 13 (abox-v ab1))
+
+(test
+ "overwrite value"
+ 7
+ (call-with-transaction
+  (lambda (tnx)
+    (let ((x (abox-v-ref ab1 tnx)))
+      (assert (= (@ x) 13))
+      (alter! x 7)
+      (cell-ref x)))))
+)
 
 (import hopefully-current)
 (define-ac-record obox v)
 
 (define b1 (make-obox 7))
 (define b2 (make-obox 6))
+
+(test-group "(current-transaction)"
 
 (assert (not (eq? b1 b2)))
 
@@ -99,14 +116,14 @@
   ;; FIXME: this is a chicken bug: without the `dbg` the procedure is
   ;; sometimes not called at all.  TBD: boil this down into a
   ;; managable test case.
-  ((dbg 'CALL with-current-transaction)
+  (with-current-transaction
    (lambda ()
      (let ((x (obox-v b1)) (y (obox-v b2)))
        (assert (= x 42))
        (assert (= y 6))
-       (dbg 'Initial 'set)
+       ;; (dbg 'Initial 'set)
        (set! (obox-v b2) (* x y)) ;; Try generalized set!
-       (assert (= (obox-v b2) 252) "initial set")
+       (test-assert "initial set" (= (obox-v b2) 252))
        (set! t1
 	     (thread-start!
 	      (lambda ()
@@ -126,17 +143,17 @@
 		 (lambda ()
 		   (define ct0 (current-transaction))
 		   (define ht0 (stmtnx-ht ct0))
-		   (dbg "Value in other thread is unchanged..." (stmtnx-id ct0))
+		   (test "Value in other thread is unchanged..." 13 (stmtnx-id ct0))
 		   (set! expected (if (= call-count 0) 6 252))
-		   (if (> call-count 0) (dbg "Second round expecting changed value" expected))
+		   (if (> call-count 0) (test "Second round expecting changed value" 252 expected))
 		   (set! call-count (add1 call-count))
 		   (let ((xx (obox-v-ref b2 (current-transaction))))
 		     (assert (= (obox-v b2) expected))
-		     (dbg (current-thread) "also in other thread former ref is still unchanged...")
-		     (assert (= (cell-ref xx) expected))
+		     (test-assert "also in other thread former ref is still unchanged"
+				  (= (cell-ref xx) expected))
 		     (mutex-unlock! mux4)
 		     (if (= call-count 1) (mutex-lock! mux3 #f #f)) ;; waiting in second invoction will deadlock
-		     (dbg "even after commit.  (Note: tests caching of references to fields.)" (stmtnx-id ct0))
+		     (test "even after commit." 13  (stmtnx-id ct0)) ;; (Note: tests caching of references to fields.)
 		     (assert (eq? (current-transaction) ct0))
 		     ;; Kept for historical interest: This fails for
 		     ;; chicken because identity-hash does not hash
@@ -219,8 +236,10 @@
   (assert (= call-count -3)) ;; -- not defined to be -3, but normally
   (assert (= (obox-v b1) 455))
   (assert (= (obox-v b2) 65)))
-
+)
 
+
+(test-group "triggers attached to transactions"
 
 (define-a-record control-variable v key assertion deps)
 
@@ -343,7 +362,7 @@
 
 (assert (= (control-variable-v a) 3))
 (assert (= (control-variable-v b) 5))
-
+)
 
 
 (define-record foo bar)
@@ -503,6 +522,7 @@
     ((= i 1))
   (run3 10))
 
-(dbg 'Done 'success)
-(exit 0)
+(test-end)
+
+(test-exit)
 ) ; end module test
